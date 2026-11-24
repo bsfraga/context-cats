@@ -1,0 +1,13 @@
+{
+  "name": "context-cats",
+  "owner": {
+    "name": "bsfraga"
+  },
+  "plugins": [
+    {
+      "name": "context-cats",
+      "source": "./",
+      "description": "Um cômodo de gatos em pixel art como fundo animado do Claude: os gatos acompanham o uso de contexto, a hora e o clima"
+    }
+  ]
+}
