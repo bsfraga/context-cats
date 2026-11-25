@@ -2,7 +2,7 @@
 
 Uma skin escura com fundo animado para o Claude (app desktop e celular): um cômodo de gatos em pixel art.
 
-![A cena dos gatos enchendo de 1 a 12 gatos e depois esvaziando pela porta](docs/preview.gif)
+![A cena dos gatos em 32 bits, com as abas laterais, enchendo de 1 a 12 gatos e depois esvaziando pela porta](docs/preview.gif)
 
 Os gatos dormem, brincam e correm pelas prateleiras. O número de gatos acompanha o uso do contexto da sessão: um gato a cada 9% usados, até 12. Quando o contexto encolhe, os excedentes vão embora pela porta. A janela e a luz seguem a hora do sistema e o clima, lido de tempos em tempos. Em datas festivas o cômodo ganha enfeites.
 
