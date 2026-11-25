@@ -3,20 +3,32 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { LOOK } from './looks.js'
 import { catsFor, exitSeconds, gatos, MAX_CATS } from './cats.js'
-import { computeSky, describe, INITIAL_SKY, PHASE_NAMES, WEATHER_NAMES } from './sky.js'
+import { FEAST_NAMES } from './festas.js'
+import { computeSky, describe, INITIAL_SKY, PHASE_NAMES, POLL_MAX, POLL_MIN, pollLine, WEATHER_NAMES } from './sky.js'
 
-const sky = atom({ plugin: 'context-cats', key: 'sky' } as const, INITIAL_SKY, { shape: 'sky-1' })
+const sky = atom({ plugin: 'context-cats', key: 'sky' } as const, INITIAL_SKY, { shape: 'sky-2' })
 
 // Acerta o céu da cena dos gatos, e só redesenha quando ele muda.
 const refreshSky = async ($: EngineInterface, isForced = false) => {
   const was = await read($, sky)
   const answer = await computeSky($, was, isForced)
 
-  if (was.phase !== answer.now.phase || was.weather !== answer.now.weather) {
+  if (was.phase !== answer.now.phase || was.weather !== answer.now.weather || was.feast !== answer.now.feast) {
     await update($, sky, () => answer.now)
   }
 
   return answer
+}
+
+const style = atom({ plugin: 'context-cats', key: 'style' } as const, { bits: 16 as 16 | 32 }, { shape: 'style-1' })
+
+// O estilo escolhido fica guardado e vale para todas as sessões.
+const loadStyle = async ($: EngineInterface): Promise<void> => {
+  const bits = (await $.store.get('bits')) === 32 ? 32 : 16
+
+  if ((await read($, style)).bits !== bits) {
+    await update($, style, () => ({ bits }))
+  }
 }
 
 const colony = atom({ plugin: 'context-cats', key: 'colony' } as const, { count: 1, leaving: 0, seq: 0 }, { shape: 'colony-1' })
@@ -102,9 +114,10 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'gatos',
-      description: 'Gatos na cena: um número de 1 a 12 fixa a quantidade, auto solta; clima, cidade <nome> e ceu <fase> <clima> cuidam da janela',
-      argumentHint: '[1-12|auto|teste|clima|cidade|ceu|fuso]',
+      description: 'Gatos na cena: um número de 1 a 12 fixa a quantidade, auto solta; clima, intervalo, cidade e ceu cuidam da janela; festa escolhe o enfeite e estilo, 16 ou 32 bits',
+      argumentHint: '[1-12|auto|teste|estilo|clima|intervalo|cidade|ceu|festa|fuso]',
     })
+    await loadStyle($).catch(error => $.ui.log(String(error)))
     await apply($)
     // Um teste pedido de fora da sessão roda uma vez, quando o mod carrega.
     if ((await $.store.get('demo')) === true) {
@@ -113,14 +126,15 @@ export const register: Register = on => {
     } else {
       await follow($).catch(error => $.ui.log(String(error)))
     }
-    // O céu da cena dos gatos: a fase do dia a cada cinco minutos, o clima a cada vinte.
+    // A sondagem do céu: a cada minuto confere a fase do dia e a festa, e lê o
+    // clima quando a última leitura passou do intervalo (ou uma falha pede nova tentativa).
     const tick = () => {
       void refreshSky($)
         .then(({ problem }) => (problem === undefined ? undefined : $.ui.log(problem)))
         .catch(error => $.ui.log(String(error)))
     }
     tick()
-    $.clock.every(5 * 60 * 1000, tick)
+    $.clock.every(60 * 1000, tick)
 
     return next(e)
   })
@@ -141,6 +155,17 @@ export const register: Register = on => {
     if (verb === 'teste') {
       return { text: await demo($) }
     }
+    if (verb === 'estilo') {
+      const bits = Number(rest[0])
+
+      if (bits !== 16 && bits !== 32) {
+        return { text: `Estilo atual: ${(await read($, style)).bits} bits. Use /gatos estilo 16 ou /gatos estilo 32.` }
+      }
+      await $.store.set('bits', bits)
+      await loadStyle($)
+
+      return { text: `Estilo: ${bits} bits.` }
+    }
     if (verb === 'fuso') {
       const minutes = Number(rest[0])
 
@@ -153,11 +178,37 @@ export const register: Register = on => {
     }
     if (verb === 'clima') {
       const { now, problem } = await refreshSky($, true)
-      const city = await $.store.get('city')
-      const where = typeof city === 'string' && city !== '' ? city : 'local pela rede'
       const held = (await $.store.get('skyHold')) === undefined ? '' : ' (céu fixado, /gatos ceu auto para soltar)'
 
-      return { text: `Céu: ${describe(now)}${held}. Cidade: ${where}.${problem === undefined ? '' : ` O clima não veio: ${problem}`}` }
+      return { text: `Céu: ${describe(now)}${held}. ${await pollLine($)}${problem === undefined ? '' : ` A leitura de agora falhou: ${problem}`}` }
+    }
+    if (verb === 'intervalo') {
+      const minutes = Number(rest[0])
+
+      if (rest[0] === 'auto') {
+        await $.store.delete('poll')
+      } else if (!Number.isInteger(minutes) || minutes < POLL_MIN || minutes > POLL_MAX) {
+        return { text: `Use /gatos intervalo <${POLL_MIN}-${POLL_MAX} minutos>, ou /gatos intervalo auto para voltar a 10.` }
+      } else {
+        await $.store.set('poll', minutes)
+      }
+      await refreshSky($)
+
+      return { text: await pollLine($) }
+    }
+    if (verb === 'festa') {
+      const feast = FEAST_NAMES[rest[0] ?? '']
+
+      if (rest[0] === 'auto') {
+        await $.store.delete('feastHold')
+      } else if (feast === undefined) {
+        return { text: `Use /gatos festa <${Object.keys(FEAST_NAMES).join('|')}>, ou /gatos festa auto para seguir o calendário.` }
+      } else {
+        await $.store.set('feastHold', feast)
+      }
+      const { now } = await refreshSky($)
+
+      return { text: now.feast === 'none' ? 'Sem enfeite de festa agora.' : `Céu: ${describe(now)}.` }
     }
     if (verb === 'cidade') {
       const city = asked.slice(verb.length).trim()
@@ -236,6 +287,6 @@ export const register: Register = on => {
     const { Svg } = $.ui.resolve(e)
     const now = await read($, colony)
 
-    return <Svg source={gatos(now, await read($, sky))} alt={`Um cômodo em pixel art com ${now.count} gatos`} isInteractive />
+    return <Svg source={gatos(now, await read($, sky), (await read($, style)).bits)} alt={`Um cômodo em pixel art com ${now.count} ${now.count === 1 ? 'gato' : 'gatos'}`} isInteractive />
   })
 }
